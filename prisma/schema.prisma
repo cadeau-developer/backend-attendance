@@ -1,0 +1,281 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model OffDay {
+  id        Int      @id @default(autoincrement())
+  date      DateTime @db.Date
+  label     String?
+  createdAt DateTime @default(now())
+
+  // null = applies to all schools (set by super admin); a value = a single school (set by its headmaster).
+  schoolId Int?
+  school   School? @relation(fields: [schoolId], references: [id])
+
+  @@unique([date, schoolId])
+}
+
+model WeekendAttendanceDay {
+  id        Int      @id @default(autoincrement())
+  date      DateTime @db.Date
+  createdAt DateTime @default(now())
+  schoolId  Int
+  school    School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@unique([date, schoolId])
+  @@index([schoolId])
+}
+
+model School {
+  id              Int              @id @default(autoincrement())
+  name            String
+  address         String?
+  status          SchoolStatus     @default(PENDING)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  city            String?
+  email           String?
+  phone           String?
+  schoolType      String?
+  logoUrl         String?
+  province        String?
+  district        String?
+  sector          String?
+  cell            String?
+  village         String?
+  classes         Class[]
+  disciplineCases DisciplineCase[]
+  disciplineSetting DisciplineSetting?
+  users           User[]
+  offDays         OffDay[]
+  weekendAttendanceDays WeekendAttendanceDay[]
+}
+
+model User {
+  id                  Int              @id @default(autoincrement())
+  name                String
+  email               String           @unique
+  phone               String?
+  passwordHash        String
+  role                UserRole
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  schoolId            Int?
+  avatarUrl           String?
+  province            String?
+  district            String?
+  sector              String?
+  cell                String?
+  village             String?
+  attendanceRecorded  Attendance[]     @relation("AttendanceRecordedBy")
+  classTeacherOf      Class[]          @relation("ClassTeacher")
+  disciplineCasesMade DisciplineCase[] @relation("DisciplineReportedBy")
+  school              School?          @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId])
+}
+
+model Class {
+  id          Int          @id @default(autoincrement())
+  name        String
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  schoolId    Int
+  teacherId   Int?
+  attendances Attendance[]
+  school        School       @relation(fields: [schoolId], references: [id])
+  teacher       User?        @relation("ClassTeacher", fields: [teacherId], references: [id])
+  students      Student[]
+  terms         Term[]
+  records       StudentRecord[]
+
+  @@index([schoolId])
+}
+
+model Term {
+  id        Int       @id @default(autoincrement())
+  starts    DateTime  @db.Date
+  ends      DateTime? @db.Date
+  createdAt DateTime  @default(now())
+  classId   Int
+  class     Class     @relation(fields: [classId], references: [id])
+
+  @@index([classId])
+}
+
+model Student {
+  id              Int              @id @default(autoincrement())
+  name            String
+  gender          String?
+  birthDate       DateTime?        @db.Date
+  admissionNo     String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  classId         Int?
+  photoUrl        String?
+  province        String?
+  district        String?
+  sector          String?
+  cell            String?
+  village         String?
+  parentNames     String?
+  parentPhone     String?
+  fatherName      String?
+  fatherPhone     String?
+  motherName      String?
+  motherPhone     String?
+  attendances     Attendance[]
+  disciplineCases DisciplineCase[]
+  records         StudentRecord[]
+  pendingTransfers PendingTransfer[]
+  class           Class?           @relation(fields: [classId], references: [id])
+  leftSchool      Boolean          @default(false)
+  leftAt          DateTime?
+
+  @@index([classId])
+}
+
+// One row per student per class per year. Tracks the classes a student has been
+// in (their record) so a student can be repeated, promoted, transferred between
+// classes, or parked in the "undergraduates" bucket at the end of a year.
+model StudentRecord {
+  id             Int      @id @default(autoincrement())
+  studentId      Int
+  classId        Int
+  schoolId       Int
+  classSnapshot  String
+  year           Int
+  status         String   @default("ACTIVE")
+  termCompleted  Boolean  @default(false)
+  movedToClassId Int?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  endedAt        DateTime?
+  class          Class    @relation(fields: [classId], references: [id])
+  student        Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, classId, year])
+  @@index([schoolId, year])
+  @@index([studentId])
+}
+
+// Tracks how many times a class has edited the attendance for a given day, so
+// attendance can be corrected only once after the first submission.
+model AttendanceDay {
+  id        Int      @id @default(autoincrement())
+  classId   Int
+  date      DateTime @db.Date
+  editCount Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([classId, date])
+  @@index([classId])
+}
+
+// A student being sent to another class, waiting for the receiving class teacher
+// to accept them. Used at year end so a class can hold off receiving new students
+// until it has finished sending its own students on.
+model PendingTransfer {
+  id              Int       @id @default(autoincrement())
+  studentId       Int
+  schoolId        Int
+  fromClassId     Int?
+  fromClassName   String
+  toClassId       Int
+  year            Int
+  status          String    @default("PENDING")
+  createdByUserId Int
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  receivedAt      DateTime?
+  student         Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([schoolId, year])
+  @@index([toClassId, status])
+  @@index([studentId])
+}
+
+model Attendance {
+  id               Int              @id @default(autoincrement())
+  date             DateTime         @db.Date
+  status           AttendanceStatus @default(PRESENT)
+  reason           String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  studentId        Int
+  classId          Int
+  recordedByUserId Int
+  class            Class            @relation(fields: [classId], references: [id])
+  recordedBy       User             @relation("AttendanceRecordedBy", fields: [recordedByUserId], references: [id])
+  student          Student          @relation(fields: [studentId], references: [id])
+
+  @@unique([studentId, date])
+  @@index([classId, date])
+}
+
+model DisciplineCase {
+  id               Int      @id @default(autoincrement())
+  description      String
+  marksDeducted    Int      @default(0)
+  date             DateTime @default(now())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  studentId        Int
+  schoolId         Int
+  reportedByUserId Int
+  reviewed         Boolean  @default(false)
+  reportedBy       User     @relation("DisciplineReportedBy", fields: [reportedByUserId], references: [id])
+  school           School   @relation(fields: [schoolId], references: [id])
+  student          Student  @relation(fields: [studentId], references: [id])
+
+  @@index([schoolId])
+  @@index([studentId])
+}
+
+// Per-school discipline policy. Each student starts a term with `defaultMarks`
+// discipline points; teachers deduct points as mistakes are reported. When a
+// student has lost `punishmentThreshold` points or more in a term they get a
+// punishment (equivalently: fall under defaultMarks - punishmentThreshold).
+model DisciplineSetting {
+  id                  Int      @id @default(autoincrement())
+  schoolId            Int      @unique
+  defaultMarks        Int      @default(40)
+  punishmentThreshold Int      @default(10)
+  updatedByUserId     Int?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  school              School   @relation(fields: [schoolId], references: [id])
+}
+
+// Platform-wide settings. A single row (id = 1) holds values set by the super
+// admin that apply to every school, such as the current academic year label.
+model PlatformSetting {
+  id              Int      @id @default(1)
+  schoolYear      String?
+  updatedAt       DateTime @updatedAt
+  updatedByUserId Int?
+}
+
+enum SchoolStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  HEADMASTER
+  TEACHER
+}
+
+enum AttendanceStatus {
+  PRESENT
+  UNAVAILABLE
+}
