@@ -48,11 +48,35 @@ const allowedOrigins = configuredOrigins.length
   ? configuredOrigins
   : defaultDevOrigins;
 
+// Local development origins: the Expo web dev server picks whatever free port
+// it finds (8081, 8082, ...), so any loopback or private-LAN origin is allowed.
+// This is safe in production too: a remote browser can never forge an Origin of
+// localhost or a private IP.
+function isLocalOrigin(origin) {
+  try {
+    const { hostname } = new URL(origin);
+    return (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "::1" ||
+      hostname.endsWith(".local") ||
+      /^10\./.test(hostname) ||
+      /^192\.168\./.test(hostname) ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
 const corsOptions = {
   origin(origin, callback) {
     // No Origin header => native mobile app or server-to-server call.
     if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
+    if (allowedOrigins.includes(origin) || allowedOrigins.includes("*")) {
+      return callback(null, true);
+    }
+    if (isLocalOrigin(origin)) return callback(null, true);
     // Disallowed browser origin: respond without CORS headers (browser blocks).
     return callback(null, false);
   },
