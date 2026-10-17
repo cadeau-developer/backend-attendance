@@ -1,6 +1,6 @@
 {
-  "name": "attendance-api",
-  "main": "src/worker.js",
+  "name": "apiattendance",
+  "main": "src/worker.mjs",
   "compatibility_date": "2026-10-17",
   "compatibility_flags": [
     "nodejs_compat"
