@@ -1,5 +1,6 @@
 require("dotenv").config();
-const app = require("./app");
+const createApp = require("./app");
+const app = createApp();
 
 const isProduction = process.env.NODE_ENV === "production";
 
