@@ -9,6 +9,9 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
+    "worker:dev": "wrangler dev",
+    "worker:preview": "wrangler versions upload",
+    "worker:deploy": "wrangler deploy",
     "seed": "node prisma/seed.js",
     "create-admin": "node scripts/create-admin.js",
     "postinstall": "prisma generate",
@@ -20,6 +23,8 @@
     "smoke": "node scripts/smoke-test.js"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^0.10.4",
+    "@prisma/adapter-neon": "^5.22.0",
     "@prisma/client": "^5.20.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
@@ -34,6 +39,11 @@
   "allowScripts": {
     "@prisma/client@5.22.0": true,
     "@prisma/engines@5.22.0": true,
-    "prisma@5.22.0": true
+    "prisma@5.22.0": true,
+    "esbuild@0.28.2": true,
+    "workerd@1.20261012.1": true
+  },
+  "devDependencies": {
+    "wrangler": "^4.151.1"
   }
 }

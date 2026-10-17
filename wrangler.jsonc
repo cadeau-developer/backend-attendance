@@ -1,0 +1,11 @@
+{
+  "name": "attendance-api",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-10-17",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "observability": {
+    "enabled": true
+  }
+}
