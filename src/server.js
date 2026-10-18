@@ -1,6 +1,7 @@
 require("dotenv").config();
 const createApp = require("./app");
-const app = createApp();
+const createApiRateLimiter = require("./middleware/apiRateLimit");
+const app = createApp({ apiRateLimiter: createApiRateLimiter() });
 
 const isProduction = process.env.NODE_ENV === "production";
 

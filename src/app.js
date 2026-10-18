@@ -17,7 +17,7 @@ const offDayRoutes = require("./routes/offdays");
 const recordRoutes = require("./routes/records");
 const settingRoutes = require("./routes/settings");
 
-function createApp({ jsonParser, rateLimitStore } = {}) {
+function createApp({ jsonParser, rateLimitStore, apiRateLimiter } = {}) {
   const app = express();
 
   // Render (and most PaaS hosts) terminate TLS at a proxy. Trusting the proxy
@@ -87,6 +87,7 @@ function createApp({ jsonParser, rateLimitStore } = {}) {
   };
 
   app.use(cors(corsOptions));
+  if (apiRateLimiter) app.use(apiRateLimiter);
   app.use(jsonParser || express.json({ limit: "10mb" }));
 
   app.get("/health", (req, res) => res.json({ ok: true }));
