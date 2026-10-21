@@ -3,6 +3,7 @@ const prisma = require("../config/db");
 const { authenticate, requireApprovedSchool } = require("../middleware/auth");
 const { requireRole } = require("../middleware/role");
 const { isRwPhone, PHONE_ERROR } = require("../utils/validate");
+const { imageRef } = require("../utils/uploads");
 
 const router = express.Router();
 
@@ -73,7 +74,7 @@ router.post(
         gender: gender || null,
         birthDate: birthDate ? new Date(birthDate) : null,
         admissionNo: admissionNo || null,
-        photoUrl: photoUrl || null,
+        photoUrl: await imageRef(photoUrl, req),
         province: province || null,
         district: district || null,
         sector: sector || null,
@@ -149,7 +150,7 @@ router.patch(
     const data = {};
     if (typeof name === "string" && name.trim()) data.name = name.trim();
     if (typeof admissionNo === "string") data.admissionNo = admissionNo.trim() || null;
-    if (typeof photoUrl === "string") data.photoUrl = photoUrl || null;
+    if (typeof photoUrl === "string") data.photoUrl = await imageRef(photoUrl, req);
     if (typeof gender === "string") data.gender = gender.trim() || null;
     if (birthDate === null || typeof birthDate === "string") data.birthDate = birthDate ? new Date(birthDate) : null;
     if (typeof province === "string") data.province = province.trim() || null;
@@ -204,7 +205,7 @@ router.post(
 
     const updated = await prisma.student.update({
       where: { id: studentId },
-      data: { photoUrl: String(photoUrl) },
+      data: { photoUrl: await imageRef(String(photoUrl), req) },
     });
 
     res.json({ student: updated });

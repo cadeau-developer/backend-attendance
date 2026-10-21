@@ -17,6 +17,8 @@ const offDayRoutes = require("./routes/offdays");
 const termRoutes = require("./routes/terms");
 const yearRoutes = require("./routes/years");
 const recordRoutes = require("./routes/records");
+const uploadRoutes = require("./routes/uploads");
+const { UPLOADS_DIR } = require("./utils/uploads");
 const settingRoutes = require("./routes/settings");
 
 function createApp({ jsonParser, rateLimitStore, apiRateLimiter } = {}) {
@@ -89,8 +91,18 @@ function createApp({ jsonParser, rateLimitStore, apiRateLimiter } = {}) {
   };
 
   app.use(cors(corsOptions));
-  if (apiRateLimiter) app.use(apiRateLimiter);
+  if (apiRateLimiter) {
+    // Image files are exempt from the API rate limit: a student list can load
+    // dozens of photos at once and must not trip the request burst limit.
+    app.use((req, res, next) =>
+      req.method === "GET" && req.path.startsWith("/uploads/") ? next() : apiRateLimiter(req, res, next)
+    );
+  }
   app.use(jsonParser || express.json({ limit: "10mb" }));
+
+  // Images are served straight from the uploads folder (created on startup).
+  app.use("/uploads", express.static(UPLOADS_DIR));
+  app.use("/uploads", uploadRoutes); // POST /uploads saves a new image
 
   app.get("/health", (req, res) => res.json({ ok: true }));
 

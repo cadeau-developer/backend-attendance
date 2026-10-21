@@ -4,6 +4,7 @@ const { hashPassword, comparePassword } = require("../utils/password");
 const { signToken } = require("../utils/jwt");
 const { isRwPhone, PHONE_ERROR } = require("../utils/validate");
 const { authenticate } = require("../middleware/auth");
+const { imageRef } = require("../utils/uploads");
 
 const router = express.Router();
 
@@ -145,7 +146,7 @@ router.patch("/me", authenticate, async (req, res) => {
     }
     data.phone = cleanPhone;
   }
-  if (typeof avatarUrl === "string") data.avatarUrl = avatarUrl || null;
+  if (typeof avatarUrl === "string") data.avatarUrl = await imageRef(avatarUrl, req);
   if (password) data.passwordHash = await hashPassword(password);
 
   const user = await prisma.user.update({

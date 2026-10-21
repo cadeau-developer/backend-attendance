@@ -4,6 +4,7 @@ const { hashPassword } = require("../utils/password");
 const { authenticate, requireApprovedSchool } = require("../middleware/auth");
 const { requireRole } = require("../middleware/role");
 const { isRwPhone, PHONE_ERROR } = require("../utils/validate");
+const { imageRef } = require("../utils/uploads");
 
 const router = express.Router();
 
@@ -31,7 +32,7 @@ router.post("/", async (req, res) => {
       name,
       email,
       phone: phone || null,
-      avatarUrl: avatarUrl || null,
+      avatarUrl: await imageRef(avatarUrl, req),
       passwordHash,
       role: "TEACHER",
       schoolId: req.user.schoolId,

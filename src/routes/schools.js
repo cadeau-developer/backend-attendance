@@ -3,6 +3,7 @@ const prisma = require("../config/db");
 const { authenticate, requireApprovedSchool } = require("../middleware/auth");
 const { requireRole } = require("../middleware/role");
 const { isRwPhone, PHONE_ERROR } = require("../utils/validate");
+const { imageRef } = require("../utils/uploads");
 
 const router = express.Router();
 
@@ -25,7 +26,7 @@ router.patch("/me", async (req, res) => {
     data.phone = cleanPhone;
   }
   if (typeof email === "string") data.email = email.trim() || null;
-  if (typeof logoUrl === "string") data.logoUrl = logoUrl || null;
+  if (typeof logoUrl === "string") data.logoUrl = await imageRef(logoUrl, req);
   if (typeof province === "string") data.province = province.trim() || null;
   if (typeof district === "string") data.district = district.trim() || null;
   if (typeof sector === "string") data.sector = sector.trim() || null;

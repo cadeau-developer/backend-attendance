@@ -4,6 +4,7 @@ const { authenticate } = require("../middleware/auth");
 const { requireRole } = require("../middleware/role");
 const { hashPassword } = require("../utils/password");
 const { isRwPhone, PHONE_ERROR } = require("../utils/validate");
+const { imageRef } = require("../utils/uploads");
 
 const router = express.Router();
 
@@ -38,7 +39,7 @@ router.patch("/profile", async (req, res) => {
     }
     data.phone = cleanPhone;
   }
-  if (avatarUrl !== undefined) data.avatarUrl = avatarUrl ? String(avatarUrl) : null;
+  if (avatarUrl !== undefined) data.avatarUrl = await imageRef(avatarUrl ? String(avatarUrl) : null, req);
   if (password !== undefined) {
     if (String(password).length < 6) {
       return res.status(400).json({ error: "Password must be at least 6 characters" });
@@ -147,7 +148,7 @@ router.post("/schools", async (req, res) => {
       city: city ? String(city) : null,
       phone: cleanPhone,
       email: email ? String(email).trim() || null : null,
-      logoUrl: logoUrl ? String(logoUrl) : null,
+      logoUrl: await imageRef(logoUrl ? String(logoUrl) : null, req),
       province: province ? String(province) : null,
       district: district ? String(district) : null,
       sector: sector ? String(sector) : null,
