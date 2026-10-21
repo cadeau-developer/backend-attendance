@@ -67,4 +67,35 @@ router.get("/", async (req, res) => {
   res.json({ teachers });
 });
 
+router.delete("/:id", async (req, res) => {
+  const teacherId = Number(req.params.id);
+  if (!teacherId) {
+    return res.status(400).json({ error: "Invalid teacher id" });
+  }
+
+  const teacher = await prisma.user.findFirst({
+    where: { id: teacherId, schoolId: req.user.schoolId, role: "TEACHER" },
+  });
+  if (!teacher) {
+    return res.status(404).json({ error: "Teacher not found" });
+  }
+
+  // Attendance and discipline rows keep a required pointer to the teacher who
+  // recorded them, so re-attribute that history to the deleting headmaster
+  // before removing the account. Class assignments clear themselves (SET NULL).
+  await prisma.$transaction([
+    prisma.attendance.updateMany({
+      where: { recordedByUserId: teacherId },
+      data: { recordedByUserId: req.user.id },
+    }),
+    prisma.disciplineCase.updateMany({
+      where: { reportedByUserId: teacherId },
+      data: { reportedByUserId: req.user.id },
+    }),
+    prisma.user.delete({ where: { id: teacherId } }),
+  ]);
+
+  res.json({ ok: true, deleted: { id: teacherId, name: teacher.name } });
+});
+
 module.exports = router;

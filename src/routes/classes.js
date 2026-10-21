@@ -89,6 +89,44 @@ router.patch("/:id", requireRole("HEADMASTER"), async (req, res) => {
   }
 });
 
+router.delete("/:id", requireRole("HEADMASTER"), async (req, res) => {
+  const classId = Number(req.params.id);
+  if (!classId) {
+    return res.status(400).json({ error: "Invalid class id" });
+  }
+
+  const klass = await prisma.class.findFirst({
+    where: { id: classId, schoolId: req.user.schoolId },
+  });
+  if (!klass) {
+    return res.status(404).json({ error: "Class not found" });
+  }
+
+  const students = await prisma.student.count({
+    where: { classId, leftSchool: false },
+  });
+  if (students > 0) {
+    return res.status(400).json({
+      error: `${students} student${students === 1 ? " is" : "s are"} still in this class. Move them to another class first.`,
+    });
+  }
+
+  const [attendances, records, terms, transfers] = await Promise.all([
+    prisma.attendance.count({ where: { classId } }),
+    prisma.studentRecord.count({ where: { classId } }),
+    prisma.term.count({ where: { classId } }),
+    prisma.pendingTransfer.count({ where: { toClassId: classId, status: "PENDING" } }),
+  ]);
+  if (attendances || records || terms || transfers) {
+    return res.status(400).json({
+      error: `${klass.name} already has records (attendance or terms) attached to it and can't be deleted. Only classes that were never used can be removed.`,
+    });
+  }
+
+  await prisma.class.delete({ where: { id: classId } });
+  res.json({ ok: true, deleted: { id: classId, name: klass.name } });
+});
+
 router.get("/", requireRole("HEADMASTER"), async (req, res) => {
   const classes = await prisma.class.findMany({
     where: { schoolId: req.user.schoolId },
