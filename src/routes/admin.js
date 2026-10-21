@@ -382,4 +382,67 @@ router.post("/schools/:id/reject", async (req, res) => {
   res.json({ school });
 });
 
+// ---------------------------------------------------------------------------
+// School year — super admin can open the year for every approved school at
+// once. Headmasters can still start/end their own school's year afterwards.
+// ---------------------------------------------------------------------------
+
+function parseYear(value) {
+  const y = Number(value);
+  return Number.isInteger(y) && y > 2000 && y < 2100 ? y : new Date().getFullYear();
+}
+
+// How many approved schools currently have the year open.
+router.get("/year-status", async (req, res) => {
+  const year = parseYear(req.query.year);
+  const [approvedSchools, openYears] = await Promise.all([
+    prisma.school.count({ where: { status: "APPROVED" } }),
+    prisma.schoolYear.count({ where: { year, ends: null } }),
+  ]);
+  res.json({ year, approvedSchools, openSchools: openYears });
+});
+
+// Open the school year for every approved school that does not have one open
+// yet. Existing open years are left untouched.
+router.post("/start-year-all", async (req, res) => {
+  const now = new Date();
+  const year = req.body.year === undefined ? now.getUTCFullYear() : parseYear(req.body.year);
+  if (year > now.getUTCFullYear()) {
+    return res.status(400).json({ error: "A school year cannot start in the future" });
+  }
+
+  const schools = await prisma.school.findMany({
+    where: { status: "APPROVED" },
+    select: { id: true },
+  });
+
+  let opened = 0;
+  await prisma.$transaction(async (tx) => {
+    for (const school of schools) {
+      const open = await tx.schoolYear.findFirst({
+        where: { schoolId: school.id, ends: null },
+      });
+      if (open) continue;
+      const existing = await tx.schoolYear.findUnique({
+        where: { schoolId_year: { schoolId: school.id, year } },
+      });
+      if (existing) {
+        await tx.schoolYear.update({ where: { id: existing.id }, data: { ends: null } });
+      } else {
+        await tx.schoolYear.create({
+          data: { schoolId: school.id, year, starts: todayDateOnly() },
+        });
+      }
+      opened += 1;
+    }
+  });
+
+  res.json({ year, approvedSchools: schools.length, opened, skipped: schools.length - opened });
+});
+
+function todayDateOnly() {
+  const d = new Date();
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+}
+
 module.exports = router;

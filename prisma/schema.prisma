@@ -54,6 +54,8 @@ model School {
   users           User[]
   offDays         OffDay[]
   weekendAttendanceDays WeekendAttendanceDay[]
+  terms           SchoolTerm[]
+  years           SchoolYear[]
 }
 
 model User {
@@ -251,6 +253,37 @@ model DisciplineSetting {
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
   school              School   @relation(fields: [schoolId], references: [id])
+}
+
+// One school-wide term at a time is current (ends == null). Ending a term sets
+// its end date; the headmaster then explicitly starts the next term. A term can
+// only be started while the school year is open.
+model SchoolTerm {
+  id        Int       @id @default(autoincrement())
+  schoolId  Int
+  number    Int
+  name      String
+  starts    DateTime  @db.Date
+  ends      DateTime? @db.Date
+  createdAt DateTime  @default(now())
+  school    School    @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@index([schoolId])
+}
+
+// The school year is open while ends == null. Terms cannot start unless a year
+// is open; ending the year archives students and closes any running term.
+model SchoolYear {
+  id        Int       @id @default(autoincrement())
+  schoolId  Int
+  year      Int
+  starts    DateTime  @db.Date
+  ends      DateTime? @db.Date
+  createdAt DateTime  @default(now())
+  school    School    @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@unique([schoolId, year])
+  @@index([schoolId])
 }
 
 // Platform-wide settings. A single row (id = 1) holds values set by the super

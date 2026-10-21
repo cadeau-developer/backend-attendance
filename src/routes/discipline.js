@@ -2,6 +2,7 @@ const express = require("express");
 const prisma = require("../config/db");
 const { authenticate, requireApprovedSchool } = require("../middleware/auth");
 const { requireRole } = require("../middleware/role");
+const { getCurrentTerm } = require("../utils/terms");
 
 const router = express.Router();
 
@@ -14,6 +15,17 @@ function parseYear(value) {
 
 function yearRange(year) {
   return { start: new Date(Date.UTC(year, 0, 1)), end: new Date(Date.UTC(year + 1, 0, 1)) };
+}
+
+// Marks window: the running term when the school tracks terms (each term starts
+// from the full marks again), otherwise the calendar year.
+async function marksWindow(schoolId, year) {
+  const term = await getCurrentTerm(schoolId);
+  if (term) {
+    return { start: term.starts, end: term.ends || new Date(), term };
+  }
+  const { start, end } = yearRange(year);
+  return { start, end, term: null };
 }
 
 // The school's discipline policy, created with sensible defaults the first time
@@ -113,7 +125,7 @@ router.get("/", requireRole("HEADMASTER"), async (req, res) => {
 // they have lost enough marks to deserve a punishment.
 router.get("/marks", requireRole("HEADMASTER"), async (req, res) => {
   const year = parseYear(req.query.year);
-  const { start, end } = yearRange(year);
+  const { start, end, term } = await marksWindow(req.user.schoolId, year);
   const settings = await getSettings(req.user.schoolId);
 
   const students = await prisma.student.findMany({
@@ -144,13 +156,18 @@ router.get("/marks", requireRole("HEADMASTER"), async (req, res) => {
     })
     .sort((a, b) => a.remaining - b.remaining || a.student.name.localeCompare(b.student.name));
 
-  res.json({ year, settings: serializeSettings(settings), students: rows });
+  res.json({
+    year,
+    term: term ? { name: term.name, starts: term.starts.toISOString().slice(0, 10) } : null,
+    settings: serializeSettings(settings),
+    students: rows,
+  });
 });
 
 // A single student's discipline marks and case history for a term (year).
 router.get("/student/:studentId", requireRole("TEACHER", "HEADMASTER"), async (req, res) => {
   const year = parseYear(req.query.year);
-  const { start, end } = yearRange(year);
+  const { start, end, term } = await marksWindow(req.user.schoolId, year);
   const studentId = Number(req.params.studentId);
 
   const student = await prisma.student.findFirst({
@@ -172,6 +189,7 @@ router.get("/student/:studentId", requireRole("TEACHER", "HEADMASTER"), async (r
 
   res.json({
     year,
+    term: term ? { name: term.name, starts: term.starts.toISOString().slice(0, 10) } : null,
     student,
     settings: serializeSettings(settings),
     deducted,

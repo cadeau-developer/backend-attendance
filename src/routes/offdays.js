@@ -56,11 +56,94 @@ router.post("/", requireRole("SUPER_ADMIN", "HEADMASTER"), async (req, res) => {
 });
 
 // List off days. Super admin: all. Headmaster/teacher: global + own school only.
+// School users also get `autoOffDays`: recent past weekdays with no attendance
+// taken by any class — automatically treated as off days.
 router.get("/", requireRole("SUPER_ADMIN", "HEADMASTER", "TEACHER"), async (req, res) => {
   const where = scopeFilter(req, false);
   const offDays = await prisma.offDay.findMany({ where, orderBy: { date: "desc" } });
-  res.json({ offDays });
+
+  let autoOffDays = [];
+  if (req.user.role !== "SUPER_ADMIN" && req.user.schoolId) {
+    const today = todayStart();
+    const from = new Date(today.getTime() - 60 * 24 * 60 * 60 * 1000);
+
+    const [attended, scheduled] = await Promise.all([
+      prisma.attendance.findMany({
+        where: { class: { schoolId: req.user.schoolId }, date: { gte: from, lt: today } },
+        select: { date: true },
+        distinct: ["date"],
+      }),
+      prisma.offDay.findMany({
+        where: { date: { gte: from, lt: today }, OR: [{ schoolId: null }, { schoolId: req.user.schoolId }] },
+        select: { date: true },
+      }),
+    ]);
+    const attendedDates = new Set(attended.map((a) => a.date.toISOString().slice(0, 10)));
+    const scheduledDates = new Set(scheduled.map((o) => o.date.toISOString().slice(0, 10)));
+
+    for (let t = from.getTime(); t < today.getTime(); t += 24 * 60 * 60 * 1000) {
+      const d = new Date(t);
+      const iso = d.toISOString().slice(0, 10);
+      if (isWeekend(d) || scheduledDates.has(iso) || attendedDates.has(iso)) continue;
+      autoOffDays.push({ date: iso, label: "No attendance was taken school-wide" });
+    }
+    autoOffDays = autoOffDays.reverse();
+  }
+
+  res.json({ offDays, autoOffDays });
 });
+
+// Server-side source of truth: is a date an off day for the caller's school?
+// Weekends (Sat/Sun) are off days unless a headmaster opened that date via
+// /weekend-attendance. A past day with NO attendance taken by any class in the
+// school is also an off day (it is not counted in attendance statistics).
+// Clients should use this instead of duplicating the logic.
+router.get(
+  "/status",
+  requireRole("SUPER_ADMIN", "HEADMASTER", "TEACHER"),
+  async (req, res) => {
+    const { date } = req.query;
+    if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: "date is required in YYYY-MM-DD format" });
+    }
+    const day = new Date(`${date}T00:00:00.000Z`);
+    if (Number.isNaN(day.getTime()) || day.toISOString().slice(0, 10) !== date) {
+      return res.status(400).json({ error: "date must be a valid calendar date" });
+    }
+
+    // Super admin has no school: only global off days apply to them.
+    const schoolId = req.user.role === "SUPER_ADMIN" ? null : req.user.schoolId;
+    const offDay = schoolId
+      ? await findScheduledOffDay(schoolId, day)
+      : await prisma.offDay.findFirst({ where: { date: day, schoolId: null } });
+
+    // Past day with zero attendance school-wide counts as an off day.
+    let autoOff = false;
+    if (!offDay && schoolId && day.getTime() < todayStart().getTime()) {
+      const anyAttendance = await prisma.attendance.findFirst({
+        where: { class: { schoolId }, date: day },
+        select: { id: true },
+      });
+      autoOff = !anyAttendance;
+    }
+
+    res.json({
+      date,
+      isOffDay: !!offDay || autoOff,
+      autoOff,
+      offDay: offDay
+        ? { label: offDay.label, weekend: offDay.weekend }
+        : autoOff
+          ? { label: "No attendance was taken school-wide", weekend: false }
+          : null,
+    });
+  }
+);
+
+function todayStart() {
+  const d = new Date();
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+}
 
 router.get(
   "/weekend-attendance",

@@ -2,6 +2,7 @@ const express = require("express");
 const prisma = require("../config/db");
 const { authenticate, requireApprovedSchool } = require("../middleware/auth");
 const { requireRole } = require("../middleware/role");
+const { endYearForClass, revertYearRecords } = require("../utils/yearEnd");
 
 const router = express.Router();
 
@@ -66,29 +67,66 @@ router.post("/end-year", requireRole("TEACHER", "HEADMASTER"), async (req, res) 
     return res.status(400).json({ error: "This class has no students to transfer" });
   }
 
-  const archived = await prisma.$transaction(async (tx) => {
-    const out = [];
-    for (const s of students) {
-      const record = await tx.studentRecord.upsert({
-        where: { studentId_classId_year: { studentId: s.id, classId: klass.id, year } },
-        create: {
-          studentId: s.id,
-          classId: klass.id,
-          schoolId: klass.schoolId,
-          classSnapshot: klass.name,
-          year,
-          status: "UNDERGRADUATE",
-          termCompleted: true,
-        },
-        update: { status: "UNDERGRADUATE", termCompleted: true },
-      });
-      await tx.student.update({ where: { id: s.id }, data: { classId: null } });
-      out.push(record);
-    }
-    return out;
+  const archived = await prisma.$transaction((tx) => endYearForClass(tx, klass, year, students));
+
+  res.json({ year, class: { id: klass.id, name: klass.name }, archived: archived });
+});
+
+// Headmaster: end the year for the WHOLE school in one action.
+router.post("/end-year-all", requireRole("HEADMASTER"), async (req, res) => {
+  const year = parseYear(req.body.year);
+  const classes = await prisma.class.findMany({
+    where: { schoolId: req.user.schoolId },
+    orderBy: { name: "asc" },
   });
 
-  res.json({ year, class: { id: klass.id, name: klass.name }, archived: archived.length });
+  let archived = 0;
+  await prisma.$transaction(async (tx) => {
+    for (const klass of classes) {
+      const students = await tx.student.findMany({ where: { classId: klass.id } });
+      if (students.length === 0) continue;
+      archived += await endYearForClass(tx, klass, year, students);
+    }
+  });
+
+  if (archived === 0) {
+    return res.status(400).json({ error: "No students found in the school to archive" });
+  }
+
+  res.json({ year, archived, classes: classes.length });
+});
+
+// Undo an end-year for one class: put the undergraduates back into their class.
+router.post("/revert-year", requireRole("TEACHER", "HEADMASTER"), async (req, res) => {
+  const year = parseYear(req.body.year);
+  const klass = await loadClassForAccess(req, res, req.body.classId);
+  if (!klass) return;
+
+  const records = await prisma.studentRecord.findMany({
+    where: { schoolId: req.user.schoolId, classId: klass.id, year, status: "UNDERGRADUATE" },
+  });
+  if (records.length === 0) {
+    return res.status(400).json({ error: `No ended-year students found for ${year}` });
+  }
+
+  const reverted = await prisma.$transaction((tx) => revertYearRecords(tx, records));
+
+  res.json({ year, class: { id: klass.id, name: klass.name }, reverted });
+});
+
+// Headmaster: undo "end year" for the whole school at once.
+router.post("/revert-year-all", requireRole("HEADMASTER"), async (req, res) => {
+  const year = parseYear(req.body.year);
+  const records = await prisma.studentRecord.findMany({
+    where: { schoolId: req.user.schoolId, year, status: "UNDERGRADUATE" },
+  });
+  if (records.length === 0) {
+    return res.status(400).json({ error: `No ended-year students found for ${year}` });
+  }
+
+  const reverted = await prisma.$transaction((tx) => revertYearRecords(tx, records));
+
+  res.json({ year, reverted });
 });
 
 // Repeat: send an undergraduate back into the class they were in.

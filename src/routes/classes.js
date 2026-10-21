@@ -2,6 +2,7 @@ const express = require("express");
 const prisma = require("../config/db");
 const { authenticate, requireApprovedSchool } = require("../middleware/auth");
 const { requireRole } = require("../middleware/role");
+const { getCurrentTerm } = require("../utils/terms");
 
 const router = express.Router();
 
@@ -140,12 +141,41 @@ router.get("/mine/dashboard", requireRole("TEACHER"), async (req, res) => {
     }
   }
 
-  const studentsWithStats = klass.students.map((s) => ({
-    ...s,
-    totalDays: totalMap[s.id] || 0,
-    absentDays: absentMap[s.id] || 0,
-    absenceRate: totalMap[s.id] ? Math.round(((absentMap[s.id] || 0) / totalMap[s.id]) * 100) : 0,
-  }));
+  // Discipline marks for the class, scoped to the running term (or the year
+  // when the school has no term tracking yet).
+  const currentTerm = await getCurrentTerm(req.user.schoolId);
+  const now = new Date();
+  const discStart = currentTerm ? currentTerm.starts : new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
+  const discEnd = currentTerm ? currentTerm.ends || now : new Date(Date.UTC(now.getUTCFullYear() + 1, 0, 1));
+
+  const [disciplineGroups, disciplineSetting] = await Promise.all([
+    prisma.disciplineCase.groupBy({
+      by: ["studentId"],
+      where: { schoolId: req.user.schoolId, studentId: { in: studentIds }, date: { gte: discStart, lt: discEnd } },
+      _sum: { marksDeducted: true },
+      _count: { id: true },
+    }),
+    prisma.disciplineSetting.findUnique({ where: { schoolId: req.user.schoolId } }),
+  ]);
+  const defaultMarks = disciplineSetting?.defaultMarks ?? 40;
+  const punishmentThreshold = disciplineSetting?.punishmentThreshold ?? 10;
+  const deductedMap = new Map(disciplineGroups.map((g) => [g.studentId, g]));
+  const marksNameMap = new Map(disciplineGroups.map((g) => [g.studentId, g._count.id]));
+
+  const studentsWithStats = klass.students.map((s) => {
+    const g = deductedMap.get(s.id);
+    const deducted = g?._sum.marksDeducted || 0;
+    return {
+      ...s,
+      totalDays: totalMap[s.id] || 0,
+      absentDays: absentMap[s.id] || 0,
+      absenceRate: totalMap[s.id] ? Math.round(((absentMap[s.id] || 0) / totalMap[s.id]) * 100) : 0,
+      disciplineDeducted: deducted,
+      disciplineRemaining: Math.max(0, defaultMarks - deducted),
+      disciplineCases: marksNameMap.get(s.id) || 0,
+      punishable: deducted >= punishmentThreshold,
+    };
+  });
 
   const genderCounts = {};
   for (const s of klass.students) {
@@ -158,11 +188,21 @@ router.get("/mine/dashboard", requireRole("TEACHER"), async (req, res) => {
     .sort((a, b) => b.absenceRate - a.absenceRate)
     .slice(0, 5);
 
+  const lowDiscipline = studentsWithStats
+    .filter((s) => s.punishable)
+    .sort((a, b) => b.disciplineDeducted - a.disciplineDeducted)
+    .slice(0, 10);
+
   res.json({
     class: { id: klass.id, name: klass.name },
     totalStudents: klass.students.length,
     genderCounts,
     highAbsence,
+    lowDiscipline,
+    disciplineSetting: { defaultMarks, punishmentThreshold },
+    term: currentTerm
+      ? { name: currentTerm.name, starts: currentTerm.starts.toISOString().slice(0, 10) }
+      : null,
     students: studentsWithStats,
   });
 });

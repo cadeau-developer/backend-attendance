@@ -3,6 +3,7 @@ const prisma = require("../config/db");
 const { authenticate, requireApprovedSchool } = require("../middleware/auth");
 const { requireRole } = require("../middleware/role");
 const { findScheduledOffDay, isWeekend } = require("../utils/schoolCalendar");
+const { getCurrentTerm } = require("../utils/terms");
 
 const router = express.Router();
 
@@ -65,6 +66,14 @@ router.post("/", requireRole("TEACHER"), async (req, res) => {
       });
   }
 
+  // Dates before the running term belong to a finished term: history, not editable.
+  const currentTerm = await getCurrentTerm(req.user.schoolId);
+  if (currentTerm && day.getTime() < currentTerm.starts.getTime()) {
+    return res.status(400).json({
+      error: `${currentTerm.name} started on ${currentTerm.starts.toISOString().slice(0, 10)} — attendance for earlier dates is history.`,
+    });
+  }
+
   const unavailableMap = new Map(unavailable.map((u) => [Number(u.studentId), u.reason || null]));
 
   const existingDay = await prisma.attendanceDay.findUnique({
@@ -123,20 +132,29 @@ router.get("/", requireRole("TEACHER"), async (req, res) => {
   }
 
   const day = toDateOnly(date);
-  const [attendance, dayRow] = await Promise.all([
+  const [attendance, dayRow, offDay, currentTerm] = await Promise.all([
     prisma.attendance.findMany({
       where: { classId: klass.id, date: day },
       include: { student: { select: { id: true, name: true, photoUrl: true } } },
     }),
     prisma.attendanceDay.findUnique({ where: { classId_date: { classId: klass.id, date: day } } }),
+    findScheduledOffDay(req.user.schoolId, day),
+    getCurrentTerm(req.user.schoolId),
   ]);
+
+  const historyDay = !!(currentTerm && day.getTime() < currentTerm.starts.getTime());
 
   res.json({
     date: day,
     attendance,
     submitted: !!dayRow,
     editCount: dayRow?.editCount ?? 0,
-    canEdit: !dayRow || dayRow.editCount < 1,
+    canEdit: !historyDay && (!dayRow || dayRow.editCount < 1),
+    history: historyDay,
+    term: currentTerm
+      ? { name: currentTerm.name, starts: currentTerm.starts.toISOString().slice(0, 10) }
+      : null,
+    offDay: offDay ? { label: offDay.label, weekend: offDay.weekend } : null,
   });
 });
 

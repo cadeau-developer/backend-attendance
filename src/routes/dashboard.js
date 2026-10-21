@@ -3,6 +3,7 @@ const prisma = require("../config/db");
 const { authenticate, requireApprovedSchool } = require("../middleware/auth");
 const { requireRole } = require("../middleware/role");
 const { findScheduledOffDay } = require("../utils/schoolCalendar");
+const { getCurrentTerm } = require("../utils/terms");
 
 const router = express.Router();
 
@@ -75,15 +76,18 @@ router.get("/", async (req, res) => {
     },
   });
 
-  // Students who lost enough discipline marks this year to deserve a punishment.
+  // Students who lost enough discipline marks this term (or year, for schools
+  // without term tracking) to deserve a punishment.
   const settingRow = await prisma.disciplineSetting.findUnique({ where: { schoolId } });
   const defaultMarks = settingRow?.defaultMarks ?? 40;
   const punishmentThreshold = settingRow?.punishmentThreshold ?? 10;
-  const yearStart = new Date(Date.UTC(new Date().getUTCFullYear(), 0, 1));
+  const currentTerm = await getCurrentTerm(schoolId);
+  const riskStart = currentTerm ? currentTerm.starts : new Date(Date.UTC(new Date().getUTCFullYear(), 0, 1));
+  const riskEnd = currentTerm ? currentTerm.ends || new Date() : new Date();
 
   const deductionGroups = await prisma.disciplineCase.groupBy({
     by: ["studentId"],
-    where: { schoolId, date: { gte: yearStart } },
+    where: { schoolId, date: { gte: riskStart, lt: riskEnd } },
     _sum: { marksDeducted: true },
   });
   const deductedByStudent = new Map(deductionGroups.map((g) => [g.studentId, g._sum.marksDeducted || 0]));
@@ -104,6 +108,44 @@ router.get("/", async (req, res) => {
       return { ...s, deducted, remaining: Math.max(0, defaultMarks - deducted) };
     })
     .sort((a, b) => b.deducted - a.deducted);
+
+  // Year-to-date attendance: students with the worst attendance (end-of-year view).
+  const yearStart = new Date(Date.UTC(new Date().getUTCFullYear(), 0, 1));
+  const yearEnd = new Date(Date.UTC(new Date().getUTCFullYear() + 1, 0, 1));
+  const attendanceGroups = await prisma.attendance.groupBy({
+    by: ["studentId", "status"],
+    where: { class: { schoolId }, date: { gte: yearStart, lt: yearEnd } },
+    _count: { status: true },
+  });
+  const attendanceByStudent = new Map();
+  for (const row of attendanceGroups) {
+    const entry = attendanceByStudent.get(row.studentId) || { totalDays: 0, absentDays: 0 };
+    entry.totalDays += row._count.status;
+    if (row.status === "UNAVAILABLE") entry.absentDays += row._count.status;
+    attendanceByStudent.set(row.studentId, entry);
+  }
+
+  const lowIds = [...attendanceByStudent.entries()]
+    .filter(([, e]) => e.totalDays > 0 && e.absentDays > 0 && (e.absentDays / e.totalDays) * 100 >= 10)
+    .map(([id]) => id);
+  const lowRows = lowIds.length
+    ? await prisma.student.findMany({
+        where: { id: { in: lowIds }, class: { schoolId } },
+        select: { id: true, name: true, photoUrl: true, class: { select: { id: true, name: true } } },
+      })
+    : [];
+  const lowAttendance = lowRows
+    .map((s) => {
+      const e = attendanceByStudent.get(s.id);
+      return {
+        student: s,
+        totalDays: e.totalDays,
+        absentDays: e.absentDays,
+        absenceRate: Math.round((e.absentDays / e.totalDays) * 100),
+      };
+    })
+    .sort((a, b) => b.absenceRate - a.absenceRate || b.absentDays - a.absentDays)
+    .slice(0, 10);
 
   const classesWithAttendance = scheduledOffDay
     ? []
@@ -150,6 +192,13 @@ router.get("/", async (req, res) => {
     offDay: scheduledOffDay ? { label: scheduledOffDay.label } : null,
     disciplineSetting: { defaultMarks, punishmentThreshold },
     punishableStudents,
+    atRisk: {
+      term: currentTerm
+        ? { name: currentTerm.name, starts: currentTerm.starts.toISOString().slice(0, 10) }
+        : null,
+      lowAttendance,
+      lowDiscipline: punishableStudents,
+    },
   });
 });
 

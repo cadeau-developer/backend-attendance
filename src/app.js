@@ -14,6 +14,8 @@ const attendanceRoutes = require("./routes/attendance");
 const disciplineRoutes = require("./routes/discipline");
 const dashboardRoutes = require("./routes/dashboard");
 const offDayRoutes = require("./routes/offdays");
+const termRoutes = require("./routes/terms");
+const yearRoutes = require("./routes/years");
 const recordRoutes = require("./routes/records");
 const settingRoutes = require("./routes/settings");
 
@@ -113,6 +115,8 @@ function createApp({ jsonParser, rateLimitStore, apiRateLimiter } = {}) {
   app.use("/discipline-cases", disciplineRoutes);
   app.use("/dashboard", dashboardRoutes);
   app.use("/off-days", offDayRoutes);
+  app.use("/terms", termRoutes);
+  app.use("/years", yearRoutes);
   app.use("/records", recordRoutes);
 
   app.use((req, res) => {
