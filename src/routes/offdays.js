@@ -62,6 +62,34 @@ router.get("/", requireRole("SUPER_ADMIN", "HEADMASTER", "TEACHER"), async (req,
   const where = scopeFilter(req, false);
   const offDays = await prisma.offDay.findMany({ where, orderBy: { date: "desc" } });
 
+  // Saturdays and Sundays are off days by default. List every default weekend
+  // day for the current year, minus explicit off days and minus weekend dates a
+  // headmaster opened for attendance.
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const yearStart = new Date(Date.UTC(year, 0, 1));
+  const yearEnd = new Date(Date.UTC(year, 11, 31));
+
+  const explicitDates = new Set(offDays.map((o) => o.date.toISOString().slice(0, 10)));
+  let openedWeekendDates = new Set();
+  if (req.user.role !== "SUPER_ADMIN" && req.user.schoolId) {
+    const opened = await prisma.weekendAttendanceDay.findMany({
+      where: { schoolId: req.user.schoolId, date: { gte: yearStart, lte: yearEnd } },
+      select: { date: true },
+    });
+    openedWeekendDates = new Set(opened.map((o) => o.date.toISOString().slice(0, 10)));
+  }
+
+  const weekendOffDays = [];
+  for (let t = yearStart.getTime(); t <= yearEnd.getTime(); t += 24 * 60 * 60 * 1000) {
+    const d = new Date(t);
+    if (!isWeekend(d)) continue;
+    const iso = d.toISOString().slice(0, 10);
+    if (explicitDates.has(iso) || openedWeekendDates.has(iso)) continue;
+    const dayName = d.getUTCDay() === 6 ? "Saturday" : "Sunday";
+    weekendOffDays.push({ date: iso, label: `${dayName} (weekend)`, weekend: true });
+  }
+
   let autoOffDays = [];
   if (req.user.role !== "SUPER_ADMIN" && req.user.schoolId) {
     const today = todayStart();
@@ -90,7 +118,7 @@ router.get("/", requireRole("SUPER_ADMIN", "HEADMASTER", "TEACHER"), async (req,
     autoOffDays = autoOffDays.reverse();
   }
 
-  res.json({ offDays, autoOffDays });
+  res.json({ offDays, autoOffDays, weekendOffDays });
 });
 
 // Server-side source of truth: is a date an off day for the caller's school?

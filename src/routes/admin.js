@@ -136,7 +136,7 @@ router.post("/schools", async (req, res) => {
     }
   }
 
-  if (status !== undefined && !["PENDING", "APPROVED", "REJECTED"].includes(status)) {
+  if (status !== undefined && !["PENDING", "APPROVED", "REJECTED", "BLOCKED"].includes(status)) {
     return res.status(400).json({ error: "Invalid school status" });
   }
 
@@ -236,7 +236,7 @@ router.patch("/schools/:id", async (req, res) => {
   if (cell !== undefined) schoolData.cell = cell ? String(cell) : null;
   if (village !== undefined) schoolData.village = village ? String(village) : null;
   if (status !== undefined) {
-    if (!["PENDING", "APPROVED", "REJECTED"].includes(status)) {
+    if (!["PENDING", "APPROVED", "REJECTED", "BLOCKED"].includes(status)) {
       return res.status(400).json({ error: "Invalid school status" });
     }
     schoolData.status = status;
@@ -342,23 +342,38 @@ router.delete("/schools/:id", async (req, res) => {
     return res.status(404).json({ error: "School not found" });
   }
 
-  await prisma.$transaction([
-    prisma.disciplineCase.deleteMany({ where: { schoolId } }),
-    prisma.attendance.deleteMany({ where: { class: { schoolId } } }),
-    prisma.studentRecord.deleteMany({ where: { schoolId } }),
-    prisma.pendingTransfer.deleteMany({ where: { schoolId } }),
-    prisma.weekendAttendanceDay.deleteMany({ where: { schoolId } }),
-    prisma.offDay.deleteMany({ where: { schoolId } }),
-    prisma.student.deleteMany({ where: { class: { schoolId } } }),
-    prisma.term.deleteMany({ where: { class: { schoolId } } }),
-    prisma.attendanceDay.deleteMany({ where: { class: { schoolId } } }),
-    prisma.disciplineSetting.deleteMany({ where: { schoolId } }),
-    prisma.class.deleteMany({ where: { schoolId } }),
-    prisma.user.deleteMany({ where: { schoolId } }),
-    prisma.school.delete({ where: { id: schoolId } }),
-  ]);
+  try {
+    await prisma.$transaction(async (tx) => {
+      const classes = await tx.class.findMany({ where: { schoolId }, select: { id: true } });
+      const classIds = classes.map((c) => c.id);
 
-  res.json({ ok: true });
+      if (classIds.length > 0) {
+        await tx.attendance.deleteMany({ where: { classId: { in: classIds } } }).catch(() => {});
+        await tx.attendanceDay.deleteMany({ where: { classId: { in: classIds } } }).catch(() => {});
+        await tx.term.deleteMany({ where: { classId: { in: classIds } } }).catch(() => {});
+        await tx.student.deleteMany({ where: { classId: { in: classIds } } }).catch(() => {});
+      }
+
+      await tx.disciplineCase.deleteMany({ where: { schoolId } }).catch(() => {});
+      await tx.disciplineCase.deleteMany({ where: { student: { classId: { in: classIds } } } }).catch(() => {});
+
+      await tx.studentRecord.deleteMany({ where: { schoolId } }).catch(() => {});
+      await tx.pendingTransfer.deleteMany({ where: { schoolId } }).catch(() => {});
+      await tx.weekendAttendanceDay.deleteMany({ where: { schoolId } }).catch(() => {});
+      await tx.offDay.deleteMany({ where: { schoolId } }).catch(() => {});
+      await tx.disciplineSetting.deleteMany({ where: { schoolId } }).catch(() => {});
+      await tx.schoolYear.deleteMany({ where: { schoolId } }).catch(() => {});
+
+      await tx.class.deleteMany({ where: { schoolId } }).catch(() => {});
+      await tx.user.deleteMany({ where: { schoolId } }).catch(() => {});
+      await tx.school.delete({ where: { id: schoolId } });
+    });
+
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("DELETE /admin/schools/:id failed", e);
+    res.status(500).json({ error: "Failed to delete school" });
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -378,19 +393,72 @@ router.get("/schools", async (req, res) => {
 });
 
 router.post("/schools/:id/approve", async (req, res) => {
-  const school = await prisma.school.update({
-    where: { id: Number(req.params.id) },
-    data: { status: "APPROVED" },
-  });
-  res.json({ school });
+  try {
+    const id = Number(req.params.id);
+    const school = await prisma.school.update({
+      where: { id },
+      data: { status: "APPROVED" },
+    });
+    res.json({ school });
+  } catch (e) {
+    console.error("approve school failed", e);
+    res.status(500).json({ error: "Failed to approve school" });
+  }
 });
 
 router.post("/schools/:id/reject", async (req, res) => {
-  const school = await prisma.school.update({
-    where: { id: Number(req.params.id) },
-    data: { status: "REJECTED" },
-  });
-  res.json({ school });
+  try {
+    const id = Number(req.params.id);
+    const school = await prisma.school.update({
+      where: { id },
+      data: { status: "REJECTED" },
+    });
+    res.json({ school });
+  } catch (e) {
+    console.error("reject school failed", e);
+    res.status(500).json({ error: "Failed to reject school" });
+  }
+});
+
+// Block an approved school: its users can no longer sign in to the dashboard
+// until a super admin unblocks it. Data is kept intact.
+router.post("/schools/:id/block", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const existing = await prisma.school.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ error: "School not found" });
+    if (existing.status !== "APPROVED") {
+      return res.status(409).json({ error: "Only an approved school can be blocked" });
+    }
+    const school = await prisma.school.update({
+      where: { id },
+      data: { status: "BLOCKED" },
+    });
+    res.json({ school });
+  } catch (e) {
+    console.error("block school failed", e);
+    res.status(500).json({ error: "Failed to block school" });
+  }
+});
+
+// Unblock a blocked school (returns it to APPROVED).
+router.post("/schools/:id/unblock", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const existing = await prisma.school.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ error: "School not found" });
+    if (existing.status !== "BLOCKED") {
+      return res.status(409).json({ error: "Only a blocked school can be unblocked" });
+    }
+    const school = await prisma.school.update({
+      where: { id },
+      data: { status: "APPROVED" },
+    });
+    res.json({ school });
+  } catch (e) {
+    console.error("unblock school failed", e);
+    res.status(500).json({ error: "Failed to unblock school" });
+  }
 });
 
 // ---------------------------------------------------------------------------

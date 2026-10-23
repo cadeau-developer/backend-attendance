@@ -299,6 +299,7 @@ enum SchoolStatus {
   PENDING
   APPROVED
   REJECTED
+  BLOCKED
 }
 
 enum UserRole {
