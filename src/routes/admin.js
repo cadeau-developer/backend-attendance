@@ -306,6 +306,9 @@ router.patch("/schools/:id", async (req, res) => {
       });
     }
     return [schoolResult, userResult];
+  }).catch((err) => {
+    console.error(err);
+    throw err;
   });
 
   res.json({
@@ -342,7 +345,14 @@ router.delete("/schools/:id", async (req, res) => {
   await prisma.$transaction([
     prisma.disciplineCase.deleteMany({ where: { schoolId } }),
     prisma.attendance.deleteMany({ where: { class: { schoolId } } }),
+    prisma.studentRecord.deleteMany({ where: { schoolId } }),
+    prisma.pendingTransfer.deleteMany({ where: { schoolId } }),
+    prisma.weekendAttendanceDay.deleteMany({ where: { schoolId } }),
+    prisma.offDay.deleteMany({ where: { schoolId } }),
     prisma.student.deleteMany({ where: { class: { schoolId } } }),
+    prisma.term.deleteMany({ where: { class: { schoolId } } }),
+    prisma.attendanceDay.deleteMany({ where: { class: { schoolId } } }),
+    prisma.disciplineSetting.deleteMany({ where: { schoolId } }),
     prisma.class.deleteMany({ where: { schoolId } }),
     prisma.user.deleteMany({ where: { schoolId } }),
     prisma.school.delete({ where: { id: schoolId } }),
