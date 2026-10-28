@@ -342,7 +342,7 @@ router.get("/students/:id/history", requireRole("HEADMASTER"), async (req, res) 
   const presentCount = recorded - unavailableCount;
   const unavailableDays = attendance
     .filter((a) => a.status === "UNAVAILABLE")
-    .map((a) => ({ date: a.date, reason: a.reason }));
+    .map((a) => ({ date: a.date, reason: a.reason || null }));
 
   res.json({
     student: { id: student.id, name: student.name, photoUrl: student.photoUrl, class: student.class },

@@ -33,6 +33,8 @@ function publicUser(user) {
           sector: user.school.sector,
           cell: user.school.cell,
           village: user.school.village,
+          headmasterName: user.school.headmasterName,
+          headmasterPhone: user.school.headmasterPhone,
         }
       : null,
   };
@@ -86,6 +88,8 @@ router.post("/register-headmaster", async (req, res) => {
         sector: sector || null,
         cell: cell || null,
         village: village || null,
+        headmasterName: name || null,
+        headmasterPhone: phone || null,
         status: "PENDING",
       },
     });

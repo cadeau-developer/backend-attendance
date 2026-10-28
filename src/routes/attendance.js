@@ -79,26 +79,20 @@ router.post("/", requireRole("TEACHER"), async (req, res) => {
   const existingDay = await prisma.attendanceDay.findUnique({
     where: { classId_date: { classId: klass.id, date: day } },
   });
-  if (existingDay && existingDay.editCount >= 1) {
+  if (existingDay) {
     return res
       .status(400)
-      .json({ error: "Attendance for this day was already updated once and can no longer be changed." });
+      .json({ error: "Attendance for this day has already been submitted and cannot be updated." });
   }
 
   const results = await prisma.$transaction(
     klass.students.map((student) => {
       const isUnavailable = unavailableMap.has(student.id);
-      return prisma.attendance.upsert({
-        where: { studentId_date: { studentId: student.id, date: day } },
-        create: {
+      return prisma.attendance.create({
+        data: {
           studentId: student.id,
           classId: klass.id,
           date: day,
-          status: isUnavailable ? "UNAVAILABLE" : "PRESENT",
-          reason: isUnavailable ? unavailableMap.get(student.id) : null,
-          recordedByUserId: req.user.id,
-        },
-        update: {
           status: isUnavailable ? "UNAVAILABLE" : "PRESENT",
           reason: isUnavailable ? unavailableMap.get(student.id) : null,
           recordedByUserId: req.user.id,
@@ -107,14 +101,9 @@ router.post("/", requireRole("TEACHER"), async (req, res) => {
     })
   );
 
-  const editCount = existingDay ? existingDay.editCount + 1 : 0;
-  if (existingDay) {
-    await prisma.attendanceDay.update({ where: { id: existingDay.id }, data: { editCount } });
-  } else {
-    await prisma.attendanceDay.create({ data: { classId: klass.id, date: day, editCount: 0 } });
-  }
+  await prisma.attendanceDay.create({ data: { classId: klass.id, date: day, editCount: 0 } });
 
-  res.status(201).json({ date: day, attendance: results, editCount, canEdit: editCount < 1 });
+  res.status(201).json({ date: day, attendance: results, editCount: 0, canEdit: false });
 });
 
 // Teacher views a given day's attendance for their class.
@@ -149,7 +138,7 @@ router.get("/", requireRole("TEACHER"), async (req, res) => {
     attendance,
     submitted: !!dayRow,
     editCount: dayRow?.editCount ?? 0,
-    canEdit: !historyDay && (!dayRow || dayRow.editCount < 1),
+    canEdit: !historyDay && !dayRow,
     history: historyDay,
     term: currentTerm
       ? { name: currentTerm.name, starts: currentTerm.starts.toISOString().slice(0, 10) }

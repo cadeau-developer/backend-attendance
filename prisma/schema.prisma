@@ -46,9 +46,11 @@ model School {
   province        String?
   district        String?
   sector          String?
-  cell            String?
-  village         String?
-  classes         Class[]
+    cell            String?
+    village         String?
+    headmasterName  String?
+    headmasterPhone String?
+    classes         Class[]
   disciplineCases DisciplineCase[]
   disciplineSetting DisciplineSetting?
   users           User[]
