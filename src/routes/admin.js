@@ -98,6 +98,7 @@ router.post("/schools", async (req, res) => {
     village,
     headmasterName,
     headmasterPhone,
+    headmasterPassword,
   } = req.body;
 
   if (!name || !String(name).trim()) {
@@ -118,24 +119,57 @@ router.post("/schools", async (req, res) => {
     return res.status(400).json({ error: "Invalid school status" });
   }
 
-  const school = await prisma.school.create({
-    data: {
-      name: String(name).trim(),
-      schoolType: schoolType ? String(schoolType) : null,
-      address: address ? String(address) : null,
-      city: city ? String(city) : null,
-      phone: cleanPhone,
-      email: email ? String(email).trim() || null : null,
-      logoUrl: await imageRef(logoUrl ? String(logoUrl) : null, req),
-      province: province ? String(province) : null,
-      district: district ? String(district) : null,
-      sector: sector ? String(sector) : null,
-      cell: cell ? String(cell) : null,
-      village: village ? String(village) : null,
-      headmasterName: headmasterName ? String(headmasterName).trim() || null : null,
-      headmasterPhone: headmasterPhone ? String(headmasterPhone).trim() || null : null,
-      status: status || "PENDING",
-    },
+  const cleanEmail = email ? String(email).trim().toLowerCase() : "";
+  if (!cleanEmail) {
+    return res.status(400).json({ error: "School email is required because the headmaster signs in with it" });
+  }
+  if (!/^\S+@\S+\.\S+$/.test(cleanEmail)) {
+    return res.status(400).json({ error: "Please enter a valid school email" });
+  }
+  if (headmasterPassword === undefined || String(headmasterPassword).length < 6) {
+    return res.status(400).json({ error: "Headmaster password must be at least 6 characters" });
+  }
+
+  const existingUser = await prisma.user.findUnique({ where: { email: cleanEmail } });
+  if (existingUser) {
+    return res.status(409).json({ error: "An account with this email already exists" });
+  }
+
+  const logo = await imageRef(logoUrl ? String(logoUrl) : null, req);
+
+  const { school, user } = await prisma.$transaction(async (tx) => {
+    const createdSchool = await tx.school.create({
+      data: {
+        name: String(name).trim(),
+        schoolType: schoolType ? String(schoolType) : null,
+        address: address ? String(address) : null,
+        city: city ? String(city) : null,
+        phone: cleanPhone,
+        email: cleanEmail,
+        logoUrl: logo,
+        province: province ? String(province) : null,
+        district: district ? String(district) : null,
+        sector: sector ? String(sector) : null,
+        cell: cell ? String(cell) : null,
+        village: village ? String(village) : null,
+        headmasterName: headmasterName ? String(headmasterName).trim() || null : null,
+        headmasterPhone: headmasterPhone ? String(headmasterPhone).trim() || null : null,
+        status: status || "PENDING",
+      },
+    });
+
+    const createdUser = await tx.user.create({
+      data: {
+        name: headmasterName ? String(headmasterName).trim() : "Headmaster",
+        email: cleanEmail,
+        phone: headmasterPhone ? String(headmasterPhone).trim() : null,
+        passwordHash: await hashPassword(String(headmasterPassword)),
+        role: "HEADMASTER",
+        schoolId: createdSchool.id,
+      },
+    });
+
+    return { school: createdSchool, user: createdUser };
   });
 
   res.status(201).json({
@@ -156,7 +190,7 @@ router.post("/schools", async (req, res) => {
       village: school.village,
       headmasterName: school.headmasterName,
       headmasterPhone: school.headmasterPhone,
-      users: [],
+      users: [{ id: user.id, name: user.name, email: user.email, phone: user.phone }],
     },
   });
 });
