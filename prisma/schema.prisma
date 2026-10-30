@@ -78,10 +78,25 @@ model User {
   village             String?
   attendanceRecorded  Attendance[]     @relation("AttendanceRecordedBy")
   classTeacherOf      Class[]          @relation("ClassTeacher")
-  disciplineCasesMade DisciplineCase[] @relation("DisciplineReportedBy")
-  school              School?          @relation(fields: [schoolId], references: [id])
+    disciplineCasesMade DisciplineCase[] @relation("DisciplineReportedBy")
+    refreshTokens       RefreshToken[]
+    school              School?          @relation(fields: [schoolId], references: [id])
 
-  @@index([schoolId])
+    @@index([schoolId])
+}
+
+// Long-lived, rotating refresh tokens. Only a SHA-256 hash of the token is
+// stored so a database leak cannot be used to mint new sessions.
+model RefreshToken {
+    id        Int       @id @default(autoincrement())
+    tokenHash String    @unique
+    userId    Int
+    expiresAt DateTime
+    revokedAt DateTime?
+    createdAt DateTime  @default(now())
+    user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@index([userId])
 }
 
 model Class {

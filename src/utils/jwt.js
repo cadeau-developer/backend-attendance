@@ -3,7 +3,9 @@ const jwt = require("jsonwebtoken");
 const ALGORITHM = "HS256";
 const ISSUER = process.env.JWT_ISSUER || "cahier-app";
 const AUDIENCE = process.env.JWT_AUDIENCE || "cahier-app-clients";
-const EXPIRES_IN = process.env.JWT_EXPIRES_IN || "30d";
+// Access tokens are short-lived (minimum 7 days) and are renewed with the
+// long-lived refresh token stored by the client.
+const EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7d";
 
 function getSecret() {
   const secret = process.env.JWT_SECRET;

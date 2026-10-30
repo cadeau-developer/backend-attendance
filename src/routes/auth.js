@@ -5,8 +5,18 @@ const { signToken } = require("../utils/jwt");
 const { isRwPhone, PHONE_ERROR } = require("../utils/validate");
 const { authenticate } = require("../middleware/auth");
 const { imageRef } = require("../utils/uploads");
+const {
+  createRefreshToken,
+  rotateRefreshToken,
+  revokeRefreshToken,
+} = require("../utils/refreshTokens");
 
 const router = express.Router();
+
+async function sessionPayload(user) {
+  const refreshToken = await createRefreshToken(user.id);
+  return { token: signToken(user), refreshToken, user: publicUser(user) };
+}
 
 function publicUser(user) {
   return {
@@ -109,8 +119,7 @@ router.post("/register-headmaster", async (req, res) => {
     return user;
   });
 
-  const token = signToken(result);
-  res.status(201).json({ token, user: publicUser(result) });
+  res.status(201).json(await sessionPayload(result));
 });
 
 router.post("/login", async (req, res) => {
@@ -130,8 +139,31 @@ router.post("/login", async (req, res) => {
     return res.status(401).json({ error: "Invalid email or password" });
   }
 
-  const token = signToken(user);
-  res.json({ token, user: publicUser(user) });
+  res.json(await sessionPayload(user));
+});
+
+// Exchanges a valid refresh token for a new access token (and a rotated
+// refresh token). Refresh tokens are single-use to limit replay damage.
+router.post("/refresh", async (req, res) => {
+  try {
+    const result = await rotateRefreshToken(req.body?.refreshToken);
+    if (!result) {
+      return res.status(401).json({ error: "Invalid or expired refresh token", code: "REFRESH_INVALID" });
+    }
+    res.json({
+      token: signToken(result.user),
+      refreshToken: result.refreshToken,
+      user: publicUser(result.user),
+    });
+  } catch (err) {
+    console.error("POST /auth/refresh failed", err);
+    res.status(500).json({ error: "Could not refresh the session" });
+  }
+});
+
+router.post("/logout", async (req, res) => {
+  await revokeRefreshToken(req.body?.refreshToken);
+  res.json({ ok: true });
 });
 
 router.get("/me", authenticate, async (req, res) => {
