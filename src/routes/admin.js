@@ -236,7 +236,7 @@ router.patch("/schools/:id", async (req, res) => {
   if (address !== undefined) schoolData.address = address ? String(address) : null;
   if (city !== undefined) schoolData.city = city ? String(city) : null;
   if (phone !== undefined) schoolData.phone = phone ? String(phone) : null;
-  if (email !== undefined) schoolData.email = email ? String(email).trim() || null : null;
+  if (email !== undefined) schoolData.email = email ? String(email).trim().toLowerCase() || null : null;
   if (province !== undefined) schoolData.province = province ? String(province) : null;
   if (district !== undefined) schoolData.district = district ? String(district) : null;
   if (sector !== undefined) schoolData.sector = sector ? String(sector) : null;
