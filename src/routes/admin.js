@@ -253,19 +253,77 @@ router.patch("/schools/:id", async (req, res) => {
 
   const headmaster = school.users[0] || null;
 
-  if (headmasterPassword !== undefined && String(headmasterPassword).length < 6) {
+  const resetPassword =
+    headmasterPassword !== undefined && String(headmasterPassword) ? String(headmasterPassword) : null;
+
+  if (resetPassword && resetPassword.length < 6) {
     return res.status(400).json({ error: "Headmaster password must be at least 6 characters" });
+  }
+
+  // The headmaster signs in with the school email. Resetting the password also
+  // (re)creates the headmaster account for schools registered without one and
+  // keeps its login email in sync with the school email.
+  const loginEmail = (email !== undefined ? String(email || "") : String(school.email || ""))
+    .trim()
+    .toLowerCase();
+  let resetEmail = null;
+
+  if (resetPassword) {
+    if (!headmaster) {
+      if (!loginEmail) {
+        return res.status(400).json({ error: "Set the school email before resetting the password" });
+      }
+      if (!/^\S+@\S+\.\S+$/.test(loginEmail)) {
+        return res.status(400).json({ error: "Please enter a valid school email" });
+      }
+      const existing = await prisma.user.findUnique({ where: { email: loginEmail } });
+      if (existing) {
+        return res.status(409).json({ error: "An account with this email already exists" });
+      }
+      resetEmail = loginEmail;
+    } else if (loginEmail && loginEmail !== headmaster.email.toLowerCase()) {
+      if (!/^\S+@\S+\.\S+$/.test(loginEmail)) {
+        return res.status(400).json({ error: "Please enter a valid school email" });
+      }
+      const existing = await prisma.user.findUnique({ where: { email: loginEmail } });
+      if (existing && existing.id !== headmaster.id) {
+        return res.status(409).json({ error: "An account with this email already exists" });
+      }
+      resetEmail = loginEmail;
+    }
   }
 
   const [updatedSchool, updatedUser] = await prisma.$transaction(async (tx) => {
     const schoolResult = await tx.school.update({ where: { id: schoolId }, data: schoolData });
     let userResult = headmaster;
-    if (headmaster && headmasterPassword !== undefined && String(headmasterPassword)) {
-      userResult = await tx.user.update({
-        where: { id: headmaster.id },
-        data: { passwordHash: await hashPassword(String(headmasterPassword)) },
-      });
+
+    if (resetPassword) {
+      const passwordHash = await hashPassword(resetPassword);
+      if (headmaster) {
+        userResult = await tx.user.update({
+          where: { id: headmaster.id },
+          data: { passwordHash, ...(resetEmail ? { email: resetEmail } : {}) },
+        });
+      } else {
+        userResult = await tx.user.create({
+          data: {
+            name:
+              (headmasterName !== undefined ? String(headmasterName).trim() : "") ||
+              school.headmasterName ||
+              "Headmaster",
+            email: resetEmail,
+            phone:
+              (headmasterPhone !== undefined ? String(headmasterPhone).trim() : "") ||
+              school.headmasterPhone ||
+              null,
+            passwordHash,
+            role: "HEADMASTER",
+            schoolId,
+          },
+        });
+      }
     }
+
     return [schoolResult, userResult];
   }).catch((err) => {
     console.error(err);

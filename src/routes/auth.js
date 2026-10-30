@@ -123,13 +123,21 @@ router.post("/register-headmaster", async (req, res) => {
 });
 
 router.post("/login", async (req, res) => {
-  const { email, password } = req.body;
+  const email = String(req.body?.email || "").trim().toLowerCase();
+  const password = req.body?.password;
 
   if (!email || !password) {
     return res.status(400).json({ error: "email and password are required" });
   }
 
-  const user = await prisma.user.findUnique({ where: { email }, include: { school: true } });
+  let user = await prisma.user.findUnique({ where: { email }, include: { school: true } });
+  if (!user) {
+    // Older accounts may have been stored with mixed-case emails.
+    user = await prisma.user.findFirst({
+      where: { email: { equals: email, mode: "insensitive" } },
+      include: { school: true },
+    });
+  }
   if (!user) {
     return res.status(401).json({ error: "Invalid email or password" });
   }
